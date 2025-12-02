@@ -20,6 +20,7 @@ sales_email = st.sidebar.text_input("電子信箱", "powerhao.chen@fongcon.com.t
 st.sidebar.divider()
 st.sidebar.header("2. 範本設定")
 uploaded_template = st.sidebar.file_uploader("上傳 Excel 範本", type=["xlsx"])
+# 若無上傳，預設讀取同目錄下的 template.xlsx
 template_source = uploaded_template if uploaded_template else "template.xlsx"
 
 # --- 2. 主畫面：客戶資訊 (紅色區塊) ---
@@ -45,7 +46,7 @@ with col2:
 st.header("📦 商品與成本明細 (藍色/黃色區塊)")
 st.caption("請在表格中輸入商品售價 (藍色) 與 內部成本 (黃色)，系統會自動計算利潤。")
 
-# 預設資料
+# 預設資料表格
 if "df_items" not in st.session_state:
     st.session_state.df_items = pd.DataFrame(
         [
@@ -60,6 +61,7 @@ if "df_items" not in st.session_state:
         ]
     )
 
+# 顯示可編輯表格
 edited_df = st.data_editor(
     st.session_state.df_items,
     num_rows="dynamic",
@@ -98,7 +100,8 @@ def generate_excel(template_src, data, items_df, sales_data):
         ws['B39'] = sales_data['mobile']
         ws['B40'] = sales_data['line']
         ws['B41'] = sales_data['email']
-        ws['B42'] = data['quotation_date'] # 報價日期
+        # 報價日期 (B42) 與 客戶簽名欄位旁
+        ws['B42'] = data['quotation_date'] 
 
         # --- 藍色 & 黃色區塊 (商品) ---
         start_row = 20  # 商品起始列
@@ -109,9 +112,10 @@ def generate_excel(template_src, data, items_df, sales_data):
         for index, row in items_df.iterrows():
             r = start_row + index
             
-            qty = row['數量'] if row['數量'] else 0
-            price = row['售價(單價)'] if row['售價(單價)'] else 0
-            cost = row['成本(單價)'] if row['成本(單價)'] else 0
+            # 處理空值，避免計算錯誤
+            qty = row['數量'] if pd.notnull(row['數量']) else 0
+            price = row['售價(單價)'] if pd.notnull(row['售價(單價)']) else 0
+            cost = row['成本(單價)'] if pd.notnull(row['成本(單價)']) else 0
             
             subtotal_price = qty * price
             subtotal_cost = qty * cost
@@ -147,9 +151,9 @@ def generate_excel(template_src, data, items_df, sales_data):
         
         ws['H29'] = total_cost     # 總成本
         ws['H30'] = total_profit   # 總毛利
-        ws['H31'] = profit_margin  # 毛利率 (Excel格式通常會設為百分比)
+        ws['H31'] = profit_margin  # 毛利率
 
-        # 輸出檔案
+        # 輸出檔案到記憶體
         output = BytesIO()
         wb.save(output)
         output.seek(0)
@@ -166,8 +170,9 @@ col_btn, col_info = st.columns([1, 3])
 with col_btn:
     generate_btn = st.button("🚀 生成報價單", type="primary")
 
+# 這裡的邏輯控制非常重要，縮排必須正確
 if generate_btn:
-    # 整理資料
+    # 1. 整理資料
     customer_data = {
         "customer_name": customer_name,
         "department": department,
@@ -188,17 +193,17 @@ if generate_btn:
         "email": sales_email
     }
     
-    # 執行生成
+    # 2. 執行生成
     excel_file = generate_excel(template_source, customer_data, edited_df, sales_data)
     
-   if excel_file:
+    # 3. 如果成功生成，顯示下載按鈕
+    if excel_file:
         file_name = f"報價單_{customer_name}_{date.today()}.xlsx"
         st.success(f"成功生成！請下載檔案。")
-        
-        # 請確認下面這一行有完整的左括號 (
         st.download_button(
             label="📥 下載 Excel 檔案",
             data=excel_file,
             file_name=file_name,
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
         )
