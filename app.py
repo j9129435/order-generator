@@ -206,4 +206,3 @@ if generate_btn:
             file_name=file_name,
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
-        )
