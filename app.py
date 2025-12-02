@@ -4,133 +4,200 @@ import openpyxl
 from io import BytesIO
 from datetime import date
 
-# --- 設定頁面 ---
-st.set_page_config(page_title="凱德訂單生成器", layout="wide")
+# --- 頁面設定 ---
+st.set_page_config(page_title="報價單生成系統 (含成本分析)", layout="wide", page_icon="📊")
 
-st.title("📝 快速 Excel 訂單生成器")
-st.markdown("輸入客戶資訊與商品明細，自動套用格式並輸出 Excel。")
+st.title("📊 報價單與成本分析生成器")
+st.info("💡 支援填寫成本與供應商資訊，系統將自動計算利潤並填入 Excel 隱藏欄位。")
 
-# --- 側邊欄：設定與上傳 ---
-st.sidebar.header("1. 系統設定")
-uploaded_template = st.sidebar.file_uploader("上傳 Excel 範本 (template.xlsx)", type=["xlsx"])
+# --- 1. 側邊欄：業務與系統設定 (綠色區塊) ---
+st.sidebar.header("1. 業務資訊 (綠色區塊)")
+sales_name = st.sidebar.text_input("承辦業務", "陳書豪 (台中業務部)")
+sales_mobile = st.sidebar.text_input("業務手機", "0934-290929")
+sales_line = st.sidebar.text_input("LINE ID", "powerhao")
+sales_email = st.sidebar.text_input("電子信箱", "powerhao.chen@fongcon.com.tw")
 
-# 如果沒有上傳，嘗試讀取本地預設檔案
+st.sidebar.divider()
+st.sidebar.header("2. 範本設定")
+uploaded_template = st.sidebar.file_uploader("上傳 Excel 範本", type=["xlsx"])
 template_source = uploaded_template if uploaded_template else "template.xlsx"
 
-# --- 主畫面：客戶資訊 ---
-st.header("2. 客戶資訊")
+# --- 2. 主畫面：客戶資訊 (紅色區塊) ---
+st.header("📝 客戶基本資料 (紅色區塊)")
 
 col1, col2 = st.columns(2)
 
 with col1:
-    customer_name = st.text_input("客戶名稱", "凱德科技股份有限公司")
-    department = st.text_input("隸屬部門", "管理部")
-    contact_person = st.text_input("聯絡人", "游豐聰 Arnode Yu")
-    phone = st.text_input("公司電話", "02-77161899 ext 208")
+    customer_name = st.text_input("客戶名稱", "康葳國際生醫有限公司")
+    department = st.text_input("隸屬部門", "")
+    contact_person = st.text_input("聯 絡 人", "邱惠微 Vivi Chiu")
+    phone = st.text_input("公司電話", "04-22360750")
+    fax = st.text_input("公司傳真", "04-22360720")
 
 with col2:
-    mobile = st.text_input("行動電話", "0931-107-252")
-    email = st.text_input("E-mail", "arnode@cadex.com.tw")
-    address = st.text_input("公司地址", "11494台北市內湖區新湖二路168號2樓")
+    mobile = st.text_input("行動電話", "0927-701927")
+    tax_id = st.text_input("統一編號", "45883386")
+    address = st.text_input("公司地址", "台中市北屯區崇德路二段130號6樓")
+    email = st.text_input("E - mail", "twou1635@gmail.com")
     quotation_date = st.date_input("報價日期", date.today())
 
-# --- 主畫面：商品明細 ---
-st.header("3. 商品明細")
-st.info("💡 直接在表格中輸入，點擊下方「+」新增列，完成後勾選刪除多餘空行。")
+# --- 3. 商品明細 (藍色+黃色區塊) ---
+st.header("📦 商品與成本明細 (藍色/黃色區塊)")
+st.caption("請在表格中輸入商品售價 (藍色) 與 內部成本 (黃色)，系統會自動計算利潤。")
 
-# 初始化預設表格資料
+# 預設資料
 if "df_items" not in st.session_state:
     st.session_state.df_items = pd.DataFrame(
         [
-            {"廠牌": "DELL", "型號": "Pro Max Tower T2", "規格": "U7-265 / 64GB / 1TB SSD", "數量": 1, "單價": 83880},
-            {"廠牌": "Service", "型號": "NBD", "規格": "FC Support Warranty", "數量": 1, "單價": 0},
+            {
+                "廠牌": "HP", "型號": "PRO400G9M", "規格": "處理器:i5-14500 / 32G / 1TB SSD", 
+                "數量": 1, "售價(單價)": 31000, "成本(單價)": 22500, "供應商": "聯強"
+            },
+            {
+                "廠牌": "", "型號": "", "規格": "記憶體: 32G DDR5", 
+                "數量": 1, "售價(單價)": 0, "成本(單價)": 2600, "供應商": "庫存"
+            },
         ]
     )
 
-# 顯示可編輯的表格
 edited_df = st.data_editor(
     st.session_state.df_items,
-    num_rows="dynamic",  # 允許使用者新增刪除列
+    num_rows="dynamic",
     column_config={
-        "數量": st.column_config.NumberColumn(min_value=1, format="%d"),
-        "單價": st.column_config.NumberColumn(format="$%d"),
+        "數量": st.column_config.NumberColumn(format="%d"),
+        "售價(單價)": st.column_config.NumberColumn(format="$%d", label="🔵 售價 (單價)"),
+        "成本(單價)": st.column_config.NumberColumn(format="$%d", label="🟡 成本 (單價)"),
+        "供應商": st.column_config.TextColumn(label="🟡 供應商"),
     },
     use_container_width=True
 )
 
-# --- 核心邏輯：生成 Excel ---
-def generate_excel(template_src, data, items_df):
+# --- 4. 核心邏輯：寫入 Excel ---
+def generate_excel(template_src, data, items_df, sales_data):
     try:
-        # 載入 Excel
         wb = openpyxl.load_workbook(template_src)
         ws = wb.active
         
-        # --- 填寫客戶資料 (座標需依照您的實際 Excel 調整) ---
-        # 這裡的座標是根據您之前的 CSV 推測的，請打開您的 template.xlsx 確認並修改
-        ws['B12'] = data['customer_name'] # 客戶名稱
-        ws['B13'] = data['department']    # 隸屬部門
-        ws['B14'] = data['contact_person']# 聯絡人
-        ws['B15'] = data['phone']         # 公司電話
-        ws['B17'] = data['mobile']        # 行動電話
-        ws['B19'] = data['address']       # 公司地址
-        ws['B20'] = data['email']         # Email
+        # ==========================================
+        #⚠️ 座標設定 (根據 219康葳...xlsx)
+        # ==========================================
         
-        # 報價日期 (假設在右下角或右上角，請自行調整)
-        # ws['F45'] = data['quotation_date'] 
+        # --- 紅色區塊 (客戶) ---
+        ws['B9'] = data['customer_name']
+        ws['B10'] = data['department']
+        ws['B11'] = data['contact_person']
+        ws['B12'] = data['phone']
+        ws['B13'] = data['fax']
+        ws['B14'] = data['mobile']
+        ws['B15'] = data['tax_id']
+        ws['B16'] = data['address']
+        ws['B17'] = data['email']
+        
+        # --- 綠色區塊 (業務) ---
+        ws['B38'] = sales_data['name']
+        ws['B39'] = sales_data['mobile']
+        ws['B40'] = sales_data['line']
+        ws['B41'] = sales_data['email']
+        ws['B42'] = data['quotation_date'] # 報價日期
 
-        # --- 填寫商品明細 ---
-        start_row = 21  # 商品起始列
+        # --- 藍色 & 黃色區塊 (商品) ---
+        start_row = 20  # 商品起始列
+        
+        total_price = 0
+        total_cost = 0
         
         for index, row in items_df.iterrows():
-            current_row = start_row + index
+            r = start_row + index
             
-            # 確保不會填寫太少資料
-            if not row["廠牌"] and not row["型號"]:
-                continue
-
-            ws[f'A{current_row}'] = row['廠牌']
-            ws[f'B{current_row}'] = row['型號']
-            ws[f'C{current_row}'] = row['規格']
-            ws[f'D{current_row}'] = row['數量']
-            ws[f'E{current_row}'] = row['單價']
+            qty = row['數量'] if row['數量'] else 0
+            price = row['售價(單價)'] if row['售價(單價)'] else 0
+            cost = row['成本(單價)'] if row['成本(單價)'] else 0
             
-            # 計算小計 (如果 Excel 範本裡該格已有公式，這行可以註解掉)
-            ws[f'F{current_row}'] = row['數量'] * row['單價']
+            subtotal_price = qty * price
+            subtotal_cost = qty * cost
+            
+            total_price += subtotal_price
+            total_cost += subtotal_cost
+            
+            # 寫入儲存格
+            ws[f'A{r}'] = row['廠牌']
+            ws[f'B{r}'] = row['型號']
+            ws[f'C{r}'] = row['規格']
+            ws[f'D{r}'] = qty
+            ws[f'E{r}'] = price
+            ws[f'F{r}'] = subtotal_price # 售價小計 (藍)
+            
+            ws[f'G{r}'] = cost           # 成本單價 (黃)
+            ws[f'H{r}'] = subtotal_cost  # 成本小計 (黃)
+            ws[f'I{r}'] = row['供應商']   # 供應商 (黃)
 
-        # 儲存到記憶體中 (不存硬碟)
+        # --- 橘色 & 統計區塊 ---
+        # 售價統計 (顯示給客戶)
+        tax_rate = 0.05
+        tax_amount = total_price * tax_rate
+        grand_total = total_price + tax_amount
+        
+        ws['F29'] = total_price    # 合計(未稅)
+        ws['F30'] = tax_amount     # 營業稅
+        ws['F31'] = grand_total    # 總計金額 (橘色)
+
+        # 成本與利潤統計 (內部查看 - H欄)
+        total_profit = total_price - total_cost
+        profit_margin = (total_profit / total_price) if total_price > 0 else 0
+        
+        ws['H29'] = total_cost     # 總成本
+        ws['H30'] = total_profit   # 總毛利
+        ws['H31'] = profit_margin  # 毛利率 (Excel格式通常會設為百分比)
+
+        # 輸出檔案
         output = BytesIO()
         wb.save(output)
         output.seek(0)
         return output
 
     except Exception as e:
-        st.error(f"發生錯誤: {e}")
+        st.error(f"Excel 處理發生錯誤: {e}")
         return None
 
-# --- 按鈕區 ---
+# --- 5. 生成按鈕 ---
 st.divider()
-if st.button("🚀 生成報價單 Excel", type="primary"):
-    # 準備資料字典
+col_btn, col_info = st.columns([1, 3])
+
+with col_btn:
+    generate_btn = st.button("🚀 生成報價單", type="primary")
+
+if generate_btn:
+    # 整理資料
     customer_data = {
         "customer_name": customer_name,
         "department": department,
         "contact_person": contact_person,
         "phone": phone,
+        "fax": fax,
         "mobile": mobile,
-        "email": email,
+        "tax_id": tax_id,
         "address": address,
+        "email": email,
         "quotation_date": quotation_date
     }
     
+    sales_data = {
+        "name": sales_name,
+        "mobile": sales_mobile,
+        "line": sales_line,
+        "email": sales_email
+    }
+    
     # 執行生成
-    excel_file = generate_excel(template_source, customer_data, edited_df)
+    excel_file = generate_excel(template_source, customer_data, edited_df, sales_data)
     
     if excel_file:
         file_name = f"報價單_{customer_name}_{date.today()}.xlsx"
-        st.success("檔案生成成功！請點擊下方按鈕下載。")
+        st.success(f"成功生成！請下載檔案。")
         st.download_button(
             label="📥 下載 Excel 檔案",
             data=excel_file,
             file_name=file_name,
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
         )
