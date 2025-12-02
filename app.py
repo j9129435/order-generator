@@ -191,13 +191,14 @@ if generate_btn:
     # 執行生成
     excel_file = generate_excel(template_source, customer_data, edited_df, sales_data)
     
-    if excel_file:
+   if excel_file:
         file_name = f"報價單_{customer_name}_{date.today()}.xlsx"
         st.success(f"成功生成！請下載檔案。")
+        
+        # 請確認下面這一行有完整的左括號 (
         st.download_button(
             label="📥 下載 Excel 檔案",
             data=excel_file,
             file_name=file_name,
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
         )
